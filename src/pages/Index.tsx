@@ -363,8 +363,9 @@ const Index = () => {
   
   const isSuperAdmin = userRole === 'super_admin';
   const isGuru = userRole === 'guru'; 
-  const hasAdminAccess = isAdmin || isSuperAdmin; 
-
+  const isPengasuh = userRole === 'pengasuh';
+  const hasAdminAccess = isAdmin || isSuperAdmin || isPengasuh;
+  
   if (userRole === 'pending') {
       return (
           <div className="flex h-screen items-center justify-center bg-gray-50 p-4">

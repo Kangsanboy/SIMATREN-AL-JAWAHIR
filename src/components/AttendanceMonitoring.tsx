@@ -44,6 +44,7 @@ const AttendanceMonitoring = ({ initialTab = "kbm" }: AttendanceMonitoringProps)
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("santri");
   const [userRole, setUserRole] = useState<string>("viewer"); 
+  const [currentUser, setCurrentUser] = useState<any>(null); // State penyimpan profil user
   
   const [santriTab, setSantriTab] = useState(initialTab);
   const [guruTab, setGuruTab] = useState("kbm");
@@ -74,7 +75,7 @@ const AttendanceMonitoring = ({ initialTab = "kbm" }: AttendanceMonitoringProps)
   const [dateFilter, setDateFilter] = useState(new Date().toISOString().split('T')[0]);
   const [logFilterKelas, setLogFilterKelas] = useState("all");
   
-  // 🔥 FORM MANUAL SANTRI BARU (DENGAN KATEGORI, KEGIATAN & ROMBEL)
+  // 🔥 FORM MANUAL SANTRI BARU
   const [formDate, setFormDate] = useState(new Date().toISOString().split('T')[0]);
   const [formCategory, setFormCategory] = useState("");
   const [formActivityId, setFormActivityId] = useState("");
@@ -136,24 +137,38 @@ const AttendanceMonitoring = ({ initialTab = "kbm" }: AttendanceMonitoringProps)
       }
   }, [initialTab]);
 
+  /* FETCH ROLE DAN PROFIL USER */
   useEffect(() => {
     const fetchRole = async () => {
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user) {
-            const { data } = await supabase.from('users').select('role').eq('id', session.user.id).single();
-            if (data) setUserRole(data.role);
+            const { data } = await supabase.from('users').select('*').eq('id', session.user.id).single();
+            if (data) {
+                setUserRole(data.role);
+                setCurrentUser(data);
+                
+                // Jika pengasuh, kunci default filternya
+                if (data.role === 'pengasuh') {
+                    setFormKelas(data.kelas_asuh);
+                    setFormGender(data.gender_asuh);
+                    setLogFilterKelas(data.kelas_asuh);
+                }
+            }
         }
     };
     fetchRole();
   }, []);
 
+  /* FETCH DATA MASTER & LOG */
   const fetchData = async () => {
+    if (!currentUser) return; // Tunggu currentUser selesai dimuat
     setLoading(true);
     try {
       const selectedDate = new Date(dateFilter);
       const startOfMonth = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1);
       const endOfMonth = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0);
 
+      // FETCH LOG ABSENSI
       const { data: logData, error: logErr } = await supabase.from('attendance_logs').select(`
           id, scan_time, status, created_at, santri_id, teacher_id, activity_id, location_id, 
           santri:santri_id(nama_lengkap, kelas, nisn, gender, rombel, kelas_mengaji, rombel_mengaji), 
@@ -165,14 +180,22 @@ const AttendanceMonitoring = ({ initialTab = "kbm" }: AttendanceMonitoringProps)
       if (logErr) throw logErr;
       if (logData) setLogs(logData as any);
 
+      // FETCH JADWAL
       const { data: schData, error: schErr } = await supabase.from('schedules').select('id, activity_id, teacher_id, kelas, rombel_id, day_of_week, rombel:rombels(nama, kategori)');
       if (schErr) throw schErr;
       if (schData) setSchedules(schData as any[]);
 
-      const { data: sData, error: sErr } = await supabase.from('santri_2025_12_01_21_34').select('id, nama_lengkap, kelas, nisn, rfid_card_id, gender, rombel, kelas_mengaji, rombel_mengaji').eq('status', 'aktif');
+      // FETCH SANTRI DENGAN FILTER ROLE PENGASUH
+      let santriQuery = supabase.from('santri_2025_12_01_21_34').select('id, nama_lengkap, kelas, nisn, rfid_card_id, gender, rombel, kelas_mengaji, rombel_mengaji').eq('status', 'aktif');
+      if (currentUser?.role === 'pengasuh') {
+          santriQuery = santriQuery.eq('kelas', parseInt(currentUser.kelas_asuh)).eq('gender', currentUser.gender_asuh);
+      }
+      
+      const { data: sData, error: sErr } = await santriQuery;
       if (sErr) throw sErr;
       if (sData) setSantriList(sData as any);
 
+      // DATA MASTER LAINNYA
       const { data: tData } = await supabase.from('teachers').select('*').eq('is_active', true);
       if (tData) setTeacherList(tData);
 
@@ -186,7 +209,10 @@ const AttendanceMonitoring = ({ initialTab = "kbm" }: AttendanceMonitoringProps)
     }
   };
 
-  useEffect(() => { fetchData(); }, [dateFilter]);
+  // Trigger fetch ulang saat filter tanggal berubah ATAU saat profil user (pengasuh) siap
+  useEffect(() => { 
+      if (currentUser) fetchData(); 
+  }, [dateFilter, currentUser]);
 
   useEffect(() => {
      setSelectedKbmClass(null); setSelectedKbmSubject(null);
@@ -346,6 +372,11 @@ const AttendanceMonitoring = ({ initialTab = "kbm" }: AttendanceMonitoringProps)
   const getStats = (type: 'santri' | 'guru', group?: string) => {
       let filtered = dailyLogs.filter(l => type === 'santri' ? l.santri_id : l.teacher_id);
       
+      // Filter tambahan untuk pengasuh agar grafik chartnya hanya menunjukkan santrinya
+      if (type === 'santri' && userRole === 'pengasuh' && currentUser) {
+          filtered = filtered.filter(l => l.santri?.kelas === parseInt(currentUser.kelas_asuh) && l.santri?.gender === currentUser.gender_asuh);
+      }
+      
       if (group === 'kbm') filtered = filtered.filter(l => getActivityType(l) === 'kbm');
       else if (group === 'mengaji') filtered = filtered.filter(l => getActivityType(l) === 'mengaji');
       else if (group === 'sholat') filtered = filtered.filter(l => getActivityType(l) === 'sholat');
@@ -367,7 +398,6 @@ const AttendanceMonitoring = ({ initialTab = "kbm" }: AttendanceMonitoringProps)
       ].filter(x => x.value > 0);
   };
 
-  // 🔥 FUNGSI SUBMIT MANUAL YANG SUDAH DIPERBARUI DENGAN ACTIVITY_ID
   const handleSubmitPermission = async (type: 'santri' | 'guru') => {
       try {
           const selectedDateTime = new Date(formDate);
@@ -397,7 +427,8 @@ const AttendanceMonitoring = ({ initialTab = "kbm" }: AttendanceMonitoringProps)
           
           toast({ title: "Berhasil", description: "Data absensi manual tersimpan.", className: "bg-green-600 text-white" });
           fetchData(); 
-          setFormSantriId(""); setFormTeacherId(""); setFormKet("");
+          setFormSantriId(""); setFormKet("");
+          if(type === 'guru') setFormTeacherId("");
       } catch (err: any) { toast({ title: "Gagal", description: err.message, variant: "destructive" }); }
   };
 
@@ -426,6 +457,11 @@ const AttendanceMonitoring = ({ initialTab = "kbm" }: AttendanceMonitoringProps)
   };
 
   const renderStudentTable = (students: Santri[], title: string, colorClass: string, cols: any[], getStatus: (id: string, key: string) => any) => {
+    // Sembunyikan tabel jika filternya tidak sesuai dengan asuhan pengasuh (misal, pengasuh Ikhwan tidak melihat tabel Akhwat)
+    if (userRole === 'pengasuh' && currentUser && currentUser.gender_asuh?.toLowerCase() !== title.toLowerCase()) {
+        return null; 
+    }
+
     return (
         <div className="mb-6 animate-in slide-in-from-bottom-4 duration-500">
             <h4 className={`text-sm font-bold uppercase mb-3 flex items-center gap-2 p-2 rounded-lg ${colorClass}`}><User size={16}/> {title} ({students.length})</h4>
@@ -499,7 +535,14 @@ const AttendanceMonitoring = ({ initialTab = "kbm" }: AttendanceMonitoringProps)
     )
   };
 
+  /* ================= FLOW KBM ================= */
   const renderKbmFlow = () => {
+      // Bypas pemilihan kelas jika user adalah pengasuh
+      if (userRole === 'pengasuh' && currentUser && !selectedKbmClass) {
+          // Pilih otomatis sesuai kelas asuhan
+          setSelectedKbmClass({ kelas: parseInt(currentUser.kelas_asuh), rombel: 'A' }); 
+      }
+
       if (!selectedKbmClass) {
           const classMap = new Map();
           santriList.forEach(s => {
@@ -529,7 +572,9 @@ const AttendanceMonitoring = ({ initialTab = "kbm" }: AttendanceMonitoringProps)
           return (
               <div className="space-y-4 animate-in slide-in-from-right-4 duration-300">
                   <div className="flex items-center gap-3 mb-4 border-b border-green-200 pb-3">
-                      <Button variant="outline" size="sm" onClick={() => setSelectedKbmClass(null)} className="hover:bg-green-50 border-green-200 text-green-700"><ArrowLeft className="w-4 h-4 mr-2"/> Kembali</Button>
+                      {userRole !== 'pengasuh' && (
+                         <Button variant="outline" size="sm" onClick={() => setSelectedKbmClass(null)} className="hover:bg-green-50 border-green-200 text-green-700"><ArrowLeft className="w-4 h-4 mr-2"/> Kembali</Button>
+                      )}
                       <h3 className="font-bold text-green-800 flex items-center gap-2">Pilih Pelajaran <Badge className="bg-green-600 ml-2 shadow-sm">Kls {selectedKbmClass.kelas}-{selectedKbmClass.rombel}</Badge></h3>
                   </div>
                   <div className="flex flex-col gap-3 max-h-[450px] overflow-y-auto pr-2 pb-2">
@@ -573,7 +618,13 @@ const AttendanceMonitoring = ({ initialTab = "kbm" }: AttendanceMonitoringProps)
       )
   };
 
+  /* ================= FLOW MENGAJI ================= */
   const renderMengajiFlow = () => {
+      // Bypas pemilihan kelas jika user adalah pengasuh
+      if (userRole === 'pengasuh' && currentUser && !selectedMengajiClass) {
+          setSelectedMengajiClass({ kelas: parseInt(currentUser.kelas_asuh), rombel: 'A' }); 
+      }
+
       if (!selectedMengajiClass) {
           const classMap = new Map();
           santriList.forEach(s => {
@@ -603,7 +654,9 @@ const AttendanceMonitoring = ({ initialTab = "kbm" }: AttendanceMonitoringProps)
           return (
               <div className="space-y-4 animate-in slide-in-from-right-4 duration-300">
                   <div className="flex items-center gap-3 mb-4 border-b border-green-200 pb-3">
-                      <Button variant="outline" size="sm" onClick={() => setSelectedMengajiClass(null)} className="hover:bg-green-50 border-green-200 text-green-700"><ArrowLeft className="w-4 h-4 mr-2"/> Kembali</Button>
+                      {userRole !== 'pengasuh' && (
+                          <Button variant="outline" size="sm" onClick={() => setSelectedMengajiClass(null)} className="hover:bg-green-50 border-green-200 text-green-700"><ArrowLeft className="w-4 h-4 mr-2"/> Kembali</Button>
+                      )}
                       <h3 className="font-bold text-green-800 flex items-center gap-2">Pilih Waktu Mengaji <Badge className="bg-blue-600 ml-2">Kls {selectedMengajiClass.kelas}-{selectedMengajiClass.rombel}</Badge></h3>
                   </div>
                   <div className="flex flex-col gap-3">
@@ -655,7 +708,13 @@ const AttendanceMonitoring = ({ initialTab = "kbm" }: AttendanceMonitoringProps)
       )
   };
 
+  /* ================= FLOW SHOLAT ================= */
   const renderSholatFlow = () => {
+      // Bypas pemilihan kelas jika user adalah pengasuh
+      if (userRole === 'pengasuh' && currentUser && !selectedSholatClass) {
+          setSelectedSholatClass({ kelas: parseInt(currentUser.kelas_asuh), rombel: 'A' }); 
+      }
+
       if (!selectedSholatClass) {
           const classMap = new Map();
           santriList.forEach(s => {
@@ -685,7 +744,9 @@ const AttendanceMonitoring = ({ initialTab = "kbm" }: AttendanceMonitoringProps)
           return (
               <div className="space-y-4 animate-in slide-in-from-right-4 duration-300">
                   <div className="flex items-center gap-3 mb-4 border-b border-green-200 pb-3">
-                      <Button variant="outline" size="sm" onClick={() => setSelectedSholatClass(null)} className="hover:bg-green-50"><ArrowLeft className="w-4 h-4 mr-2"/> Kembali</Button>
+                      {userRole !== 'pengasuh' && (
+                          <Button variant="outline" size="sm" onClick={() => setSelectedSholatClass(null)} className="hover:bg-green-50"><ArrowLeft className="w-4 h-4 mr-2"/> Kembali</Button>
+                      )}
                       <h3 className="font-bold text-green-800 flex items-center gap-2">Pilih Waktu Sholat <Badge className="bg-teal-600 ml-2">Kls {selectedSholatClass.kelas}-{selectedSholatClass.rombel}</Badge></h3>
                   </div>
                   <div className="flex flex-col gap-3">
@@ -747,6 +808,7 @@ const AttendanceMonitoring = ({ initialTab = "kbm" }: AttendanceMonitoringProps)
       )
   };
 
+  /* ================= FLOW EKSKUL ================= */
   const renderEkskulFlow = () => {
       if (!selectedEkskul) {
           const ekskuls = activities.filter(a => a.category === 'ekskul' && schedules.some(sch => sch.activity_id === a.id));
@@ -771,37 +833,43 @@ const AttendanceMonitoring = ({ initialTab = "kbm" }: AttendanceMonitoringProps)
       const isPilihan = members.some(m => m.activity_id === selectedEkskul.id) || selectedEkskul.tipe_ekskul === 'pilihan';
 
       if (!isPilihan && !selectedEkskulClass) {
-          const classMap = new Map();
-          santriList.forEach(s => {
-              const k = s.kelas; const r = getRombel(s.rombel); const key = `${k}-${r}`;
-              if (!classMap.has(key)) classMap.set(key, { kelas: k, rombel: r, count: 0 });
-              classMap.get(key).count++;
-          });
-          const uniqueClasses = Array.from(classMap.values()).sort((a,b) => a.kelas === b.kelas ? a.rombel.localeCompare(b.rombel) : a.kelas - b.kelas);
+          
+          // Bypas pemilihan kelas jika user adalah pengasuh
+          if (userRole === 'pengasuh' && currentUser) {
+             setSelectedEkskulClass({ kelas: parseInt(currentUser.kelas_asuh), rombel: 'A' }); 
+          } else {
+              const classMap = new Map();
+              santriList.forEach(s => {
+                  const k = s.kelas; const r = getRombel(s.rombel); const key = `${k}-${r}`;
+                  if (!classMap.has(key)) classMap.set(key, { kelas: k, rombel: r, count: 0 });
+                  classMap.get(key).count++;
+              });
+              const uniqueClasses = Array.from(classMap.values()).sort((a,b) => a.kelas === b.kelas ? a.rombel.localeCompare(b.rombel) : a.kelas - b.kelas);
 
-          return (
-              <div className="space-y-4 animate-in slide-in-from-right-4 duration-300">
-                  <div className="flex items-center gap-3 mb-4 border-b border-green-200 pb-3">
-                      <Button variant="outline" size="sm" onClick={() => setSelectedEkskul(null)} className="hover:bg-green-50"><ArrowLeft className="w-4 h-4 mr-2"/> Kembali</Button>
-                      <h3 className="font-bold text-green-800 flex items-center gap-2">Pilih Kelas <Badge className="bg-orange-600 ml-2">{selectedEkskul.name}</Badge></h3>
+              return (
+                  <div className="space-y-4 animate-in slide-in-from-right-4 duration-300">
+                      <div className="flex items-center gap-3 mb-4 border-b border-green-200 pb-3">
+                          <Button variant="outline" size="sm" onClick={() => setSelectedEkskul(null)} className="hover:bg-green-50"><ArrowLeft className="w-4 h-4 mr-2"/> Kembali</Button>
+                          <h3 className="font-bold text-green-800 flex items-center gap-2">Pilih Kelas <Badge className="bg-orange-600 ml-2">{selectedEkskul.name}</Badge></h3>
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                          {uniqueClasses.map(c => (
+                              <div key={`${c.kelas}-${c.rombel}`} onClick={() => setSelectedEkskulClass(c)} className="bg-white border-2 border-green-100 rounded-xl p-4 text-center cursor-pointer hover:border-green-500 hover:bg-green-50 transition-all shadow-sm">
+                                  <h4 className="font-extrabold text-lg text-gray-800 mb-1">Kelas {c.kelas}-{c.rombel}</h4>
+                                  <p className="text-xs text-gray-500">{c.count} Santri</p>
+                              </div>
+                          ))}
+                      </div>
                   </div>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                      {uniqueClasses.map(c => (
-                          <div key={`${c.kelas}-${c.rombel}`} onClick={() => setSelectedEkskulClass(c)} className="bg-white border-2 border-green-100 rounded-xl p-4 text-center cursor-pointer hover:border-green-500 hover:bg-green-50 transition-all shadow-sm">
-                              <h4 className="font-extrabold text-lg text-gray-800 mb-1">Kelas {c.kelas}-{c.rombel}</h4>
-                              <p className="text-xs text-gray-500">{c.count} Santri</p>
-                          </div>
-                      ))}
-                  </div>
-              </div>
-          )
+              )
+          }
       }
 
       let classStudents: Santri[] = [];
       if (isPilihan) {
           const memberIds = members.filter(m => m.activity_id === selectedEkskul.id).map(m => m.santri_id);
           classStudents = santriList.filter(s => memberIds.includes(s.id));
-      } else {
+      } else if (selectedEkskulClass) {
           classStudents = santriList.filter(s => s.kelas === selectedEkskulClass.kelas && getRombel(s.rombel) === selectedEkskulClass.rombel);
       }
 
@@ -823,7 +891,7 @@ const AttendanceMonitoring = ({ initialTab = "kbm" }: AttendanceMonitoringProps)
           <div className="space-y-2 animate-in slide-in-from-bottom-4 duration-300">
               <div className="flex items-center gap-4 mb-4 bg-green-50 p-4 rounded-xl border-2 border-green-200 shadow-sm">
                   <Button variant="outline" size="sm" onClick={() => isPilihan ? setSelectedEkskul(null) : setSelectedEkskulClass(null)} className="bg-white border-green-200 text-green-700"><ArrowLeft className="w-4 h-4 mr-2"/> Kembali</Button>
-                  <div><h3 className="font-extrabold text-green-900 text-lg flex items-center gap-2"><Trophy size={18}/> {selectedEkskul.name}</h3><p className="text-xs font-bold text-green-700 mt-1">{isPilihan ? 'Anggota Ekskul Pilihan' : `Kelas Wajib ${selectedEkskulClass.kelas}-${selectedEkskulClass.rombel}`} • {classStudents.length} Santri</p></div>
+                  <div><h3 className="font-extrabold text-green-900 text-lg flex items-center gap-2"><Trophy size={18}/> {selectedEkskul.name}</h3><p className="text-xs font-bold text-green-700 mt-1">{isPilihan ? 'Anggota Ekskul Pilihan' : `Kelas Wajib ${selectedEkskulClass?.kelas}-${selectedEkskulClass?.rombel}`} • {classStudents.length} Santri</p></div>
               </div>
               {renderStudentTable(ikhwan, "Ikhwan", "bg-green-100 text-green-800 border-l-4 border-green-600", columns, getStatus)}
               {renderStudentTable(akhwat, "Akhwat", "bg-pink-100 text-pink-800 border-l-4 border-pink-500", columns, getStatus)}
@@ -832,6 +900,7 @@ const AttendanceMonitoring = ({ initialTab = "kbm" }: AttendanceMonitoringProps)
   };
 
   /* ================= 2. FLOW GURU ================= */
+  // ... (Flow Guru tidak diubah karena tab Guru sudah disembunyikan untuk pengasuh di UI bawah) ...
   const renderGuruKbmFlow = () => {
         if (!selectedGuruKbmSubject) {
             const subjects = activities.filter(a => a.category === 'pelajaran' && schedules.some(sch => sch.activity_id === a.id && sch.teacher_id));
@@ -1081,9 +1150,10 @@ const AttendanceMonitoring = ({ initialTab = "kbm" }: AttendanceMonitoringProps)
 
       <Tabs defaultValue="santri" value={activeTab} onValueChange={setActiveTab} className="w-full">
         
-        <TabsList className={`grid w-full mb-6 bg-gray-100 p-1 ${userRole === 'guru' ? 'grid-cols-1' : 'grid-cols-2'}`}>
+        {/* TAB LIST: Sembunyikan Guru untuk Pengasuh */}
+        <TabsList className={`grid w-full mb-6 bg-gray-100 p-1 ${userRole === 'guru' || userRole === 'pengasuh' ? 'grid-cols-1' : 'grid-cols-2'}`}>
             <TabsTrigger value="santri" className="data-[state=active]:bg-green-600 data-[state=active]:text-white shadow-sm font-bold">Santri</TabsTrigger>
-            {userRole !== 'guru' && (
+            {userRole !== 'guru' && userRole !== 'pengasuh' && (
                 <TabsTrigger value="guru" className="data-[state=active]:bg-teal-600 data-[state=active]:text-white shadow-sm font-bold">Guru & Staf</TabsTrigger>
             )}
         </TabsList>
@@ -1114,7 +1184,7 @@ const AttendanceMonitoring = ({ initialTab = "kbm" }: AttendanceMonitoringProps)
                 </Tabs>
             </div>
 
-            {/* 🔥 FORM MANUAL SANTRI YANG SUDAH DIPERBARUI */}
+            {/* 🔥 FORM MANUAL SANTRI */}
             <Card className="border-l-4 border-l-purple-500 bg-purple-50/30 shadow-sm">
                 <CardHeader className="pb-2"><CardTitle className="text-sm text-purple-800 uppercase font-bold">Input Manual Sakit / Izin / Pulang (Santri)</CardTitle></CardHeader>
                 <CardContent className="space-y-3">
@@ -1143,16 +1213,49 @@ const AttendanceMonitoring = ({ initialTab = "kbm" }: AttendanceMonitoringProps)
                         </div>
                     </div>
 
-                    {/* Baris 2: Filter Kelas */}
+                    {/* Baris 2: Filter Kelas (Dikunci untuk pengasuh) */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        <div className="space-y-1"><label className="text-[10px] font-bold uppercase">Kelas</label><Select value={formKelas} onValueChange={(v) => { setFormKelas(v); setFormRombel(""); setFormSantriId(""); }}><SelectTrigger className="bg-white h-9 border-purple-200"><SelectValue placeholder="Pilih Kelas..." /></SelectTrigger><SelectContent>{CLASSES.map(k => <SelectItem key={k} value={String(k)}>Kelas {k}</SelectItem>)}</SelectContent></Select></div>
-                        <div className="space-y-1"><label className="text-[10px] font-bold uppercase">Rombel</label><Select value={formRombel} onValueChange={(v) => { setFormRombel(v); setFormSantriId(""); }} disabled={!formKelas}><SelectTrigger className="bg-white h-9 border-purple-200"><SelectValue placeholder="Pilih Rombel..." /></SelectTrigger><SelectContent>{getUniqueRombels(formKelas).map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent></Select></div>
-                        <div className="space-y-1"><label className="text-[10px] font-bold uppercase">Gender</label><Select value={formGender} onValueChange={(v) => { setFormGender(v); setFormSantriId(""); }}><SelectTrigger className="bg-white h-9 border-purple-200"><SelectValue placeholder="Pilih Gender..." /></SelectTrigger><SelectContent><SelectItem value="ikhwan">Ikhwan</SelectItem><SelectItem value="akhwat">Akhwat</SelectItem></SelectContent></Select></div>
+                        <div className="space-y-1">
+                            <label className="text-[10px] font-bold uppercase">Kelas</label>
+                            <Select value={formKelas} onValueChange={(v) => { setFormKelas(v); setFormRombel(""); setFormSantriId(""); }} disabled={userRole === 'pengasuh'}>
+                                <SelectTrigger className={`h-9 border-purple-200 ${userRole === 'pengasuh' ? 'bg-gray-100 opacity-60 cursor-not-allowed' : 'bg-white'}`}>
+                                    <SelectValue placeholder="Pilih Kelas..." />
+                                </SelectTrigger>
+                                <SelectContent>{CLASSES.map(k => <SelectItem key={k} value={String(k)}>Kelas {k}</SelectItem>)}</SelectContent>
+                            </Select>
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-[10px] font-bold uppercase">Rombel</label>
+                            <Select value={formRombel} onValueChange={(v) => { setFormRombel(v); setFormSantriId(""); }} disabled={!formKelas}>
+                                <SelectTrigger className="bg-white h-9 border-purple-200"><SelectValue placeholder="Pilih Rombel..." /></SelectTrigger>
+                                <SelectContent>{getUniqueRombels(formKelas).map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
+                            </Select>
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-[10px] font-bold uppercase">Gender</label>
+                            <Select value={formGender} onValueChange={(v) => { setFormGender(v); setFormSantriId(""); }} disabled={userRole === 'pengasuh'}>
+                                <SelectTrigger className={`h-9 border-purple-200 ${userRole === 'pengasuh' ? 'bg-gray-100 opacity-60 cursor-not-allowed' : 'bg-white'}`}>
+                                    <SelectValue placeholder="Pilih Gender..." />
+                                </SelectTrigger>
+                                <SelectContent><SelectItem value="ikhwan">Ikhwan</SelectItem><SelectItem value="akhwat">Akhwat</SelectItem></SelectContent>
+                            </Select>
+                        </div>
                     </div>
 
                     {/* Baris 3: Eksekusi */}
                     <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-                        <div className="md:col-span-4 space-y-1"><label className="text-[10px] font-bold uppercase">Nama Santri</label><Select value={formSantriId} onValueChange={setFormSantriId} disabled={!formKelas || !formRombel || !formGender}><SelectTrigger className="bg-white h-9 border-purple-200"><SelectValue placeholder="Cari Nama..." /></SelectTrigger><SelectContent className="max-h-[200px]">{santriList.filter(s => String(s.kelas) === formKelas && (getRombel(s.rombel) === formRombel || getRombel(s.rombel_mengaji) === formRombel) && (s.gender === formGender || (formGender==='ikhwan' ? s.gender==='L':s.gender==='P'))).map(s => (<SelectItem key={s.id} value={s.id}>{s.nama_lengkap}</SelectItem>))}</SelectContent></Select></div>
+                        <div className="md:col-span-4 space-y-1">
+                            <label className="text-[10px] font-bold uppercase">Nama Santri</label>
+                            <Select value={formSantriId} onValueChange={setFormSantriId} disabled={!formKelas || !formRombel || !formGender}>
+                                <SelectTrigger className="bg-white h-9 border-purple-200"><SelectValue placeholder="Cari Nama..." /></SelectTrigger>
+                                <SelectContent className="max-h-[200px]">
+                                    {santriList
+                                        .filter(s => String(s.kelas) === formKelas && (getRombel(s.rombel) === formRombel || getRombel(s.rombel_mengaji) === formRombel) && (s.gender === formGender || (formGender==='ikhwan' ? s.gender==='L':s.gender==='P')))
+                                        .map(s => (<SelectItem key={s.id} value={s.id}>{s.nama_lengkap}</SelectItem>))
+                                    }
+                                </SelectContent>
+                            </Select>
+                        </div>
                         <div className="md:col-span-3 space-y-1"><label className="text-[10px] font-bold uppercase">Status Kehadiran</label><Select value={formStatus} onValueChange={setFormStatus}><SelectTrigger className="bg-white h-9 border-purple-200"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Izin">Izin</SelectItem><SelectItem value="Sakit">Sakit</SelectItem><SelectItem value="Pulang" className="text-purple-600 font-bold">Pulang</SelectItem></SelectContent></Select></div>
                         <div className="md:col-span-3 space-y-1"><label className="text-[10px] font-bold uppercase">Keterangan Opsional</label><Input placeholder="Cth: Izin berobat..." value={formKet} onChange={e => setFormKet(e.target.value)} className="bg-white h-9 border-purple-200" /></div>
                         <div className="md:col-span-2"><Button onClick={() => handleSubmitPermission('santri')} className="bg-purple-600 hover:bg-purple-700 text-white w-full shadow-md"><Save className="w-4 h-4 mr-2"/> Simpan</Button></div>
@@ -1162,15 +1265,28 @@ const AttendanceMonitoring = ({ initialTab = "kbm" }: AttendanceMonitoringProps)
 
             <Card className="shadow-sm border-green-200">
                 <CardHeader className="flex flex-row justify-between items-center bg-green-50/50 border-b border-green-100 pb-2 pt-3 px-4">
-                    <CardTitle className="text-sm font-bold flex items-center gap-2 text-green-800"><Clock className="w-4 h-4 text-green-600"/> Riwayat Absensi Santri (Sesuai Tanggal Filter)</CardTitle>
-                    <Select value={logFilterKelas} onValueChange={setLogFilterKelas}><SelectTrigger className="w-[100px] h-7 text-[10px] bg-white font-bold border-green-200"><SelectValue placeholder="Filter" /></SelectTrigger><SelectContent><SelectItem value="all">Semua</SelectItem>{CLASSES.map(k => <SelectItem key={k} value={String(k)}>Kelas {k}</SelectItem>)}</SelectContent></Select>
+                    <CardTitle className="text-sm font-bold flex items-center gap-2 text-green-800"><Clock className="w-4 h-4 text-green-600"/> Riwayat Absensi Santri</CardTitle>
+                    <Select value={logFilterKelas} onValueChange={setLogFilterKelas} disabled={userRole === 'pengasuh'}>
+                        <SelectTrigger className={`w-[100px] h-7 text-[10px] font-bold border-green-200 ${userRole === 'pengasuh' ? 'bg-gray-100 opacity-60 cursor-not-allowed' : 'bg-white'}`}>
+                            <SelectValue placeholder="Filter" />
+                        </SelectTrigger>
+                        <SelectContent><SelectItem value="all">Semua</SelectItem>{CLASSES.map(k => <SelectItem key={k} value={String(k)}>Kelas {k}</SelectItem>)}</SelectContent>
+                    </Select>
                 </CardHeader>
                 <CardContent className="p-0">
                     <div className="max-h-[300px] overflow-y-auto divide-y divide-gray-100">
-                        {dailyLogs.filter(l => l.santri_id).filter(l => logFilterKelas === 'all' || String(l.santri?.kelas) === logFilterKelas).length === 0 ? (
+                        {dailyLogs
+                            .filter(l => l.santri_id)
+                            .filter(l => logFilterKelas === 'all' || String(l.santri?.kelas) === logFilterKelas)
+                            .filter(l => userRole === 'pengasuh' ? l.santri?.gender === currentUser?.gender_asuh : true)
+                            .length === 0 ? (
                              <div className="p-6 text-center text-xs text-gray-400 italic">Belum ada aktivitas absensi.</div>
                         ) : (
-                            dailyLogs.filter(l => l.santri_id).filter(l => logFilterKelas === 'all' || String(l.santri?.kelas) === logFilterKelas).map((log) => (
+                            dailyLogs
+                            .filter(l => l.santri_id)
+                            .filter(l => logFilterKelas === 'all' || String(l.santri?.kelas) === logFilterKelas)
+                            .filter(l => userRole === 'pengasuh' ? l.santri?.gender === currentUser?.gender_asuh : true)
+                            .map((log) => (
                                 <div key={log.id} className="flex items-center justify-between p-3 px-4 hover:bg-green-50/50 transition-colors">
                                     <div className="flex items-center gap-3">
                                         <div className={`p-1.5 rounded-full shadow-sm border ${log.status === 'Hadir' ? 'bg-green-100 text-green-600 border-green-200' : (log.status === 'Pulang' ? 'bg-purple-100 text-purple-600 border-purple-200' : 'bg-red-100 text-red-600 border-red-200')}`}>
@@ -1190,7 +1306,7 @@ const AttendanceMonitoring = ({ initialTab = "kbm" }: AttendanceMonitoringProps)
             </Card>
         </TabsContent>
 
-        {userRole !== 'guru' && (
+        {userRole !== 'guru' && userRole !== 'pengasuh' && (
             <TabsContent value="guru" className="space-y-6">
                 
                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -1217,7 +1333,7 @@ const AttendanceMonitoring = ({ initialTab = "kbm" }: AttendanceMonitoringProps)
                     </Tabs>
                 </div>
 
-                {/* 🔥 FORM MANUAL GURU YANG SUDAH DIPERBARUI */}
+                {/* 🔥 FORM MANUAL GURU */}
                 <Card className="border-l-4 border-l-purple-500 bg-purple-50/30 shadow-sm">
                     <CardHeader className="pb-2"><CardTitle className="text-sm text-purple-800 uppercase font-bold">Input Manual Sakit / Izin / Pulang (Guru)</CardTitle></CardHeader>
                     <CardContent className="space-y-3">

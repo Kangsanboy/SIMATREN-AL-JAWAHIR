@@ -27,7 +27,7 @@ import {
   LayoutDashboard, Wallet, Users, User, UserCog, LogOut, PanelLeftClose, PanelLeftOpen,
   Banknote, FileSpreadsheet, CalendarDays, Menu, History, ArrowUpCircle, ArrowDownCircle,
   Clock, ShieldAlert, Trash2, ScanBarcode, Store, BarChart3, GraduationCap, CalendarClock, 
-  Activity, Shield, Library, ShieldCheck, UserCheck, RefreshCcw, AlertTriangle
+  Activity, Shield, Library, ShieldCheck, UserCheck, RefreshCcw, AlertTriangle, Bell
 } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip as RechartsTooltip } from "recharts";
 
@@ -65,6 +65,10 @@ const Index = () => {
   const [resetKelas, setResetKelas] = useState<string>("");
   const [resetGender, setResetGender] = useState<string>("");
   const [isResetting, setIsResetting] = useState(false);
+
+  // 🔥 STATE NOTIFIKASI
+  const [pendingUsersCount, setPendingUsersCount] = useState(0);
+  const [isNotifOpen, setIsNotifOpen] = useState(false);
 
   const [historyDate, setHistoryDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [riwayatTrx, setRiwayatTrx] = useState<TransaksiItem[]>([]);
@@ -230,17 +234,32 @@ const Index = () => {
       }
   }, [userRole]);
 
+  // 🔥 FETCH DATA NOTIFIKASI PENDING USER (HANYA SUPER ADMIN)
+  const fetchPendingUsers = useCallback(async () => {
+      if (userRole === 'super_admin') {
+          const { count, error } = await supabase
+            .from('users')
+            .select('*', { count: 'exact', head: true })
+            .eq('role', 'pending');
+            
+          if (!error && count !== null) {
+              setPendingUsersCount(count);
+          }
+      }
+  }, [userRole]);
+
   useEffect(() => { 
       if (user) { 
-          fetchKeuangan(); fetchRekapSaldo(); fetchAbsensiHariIni(); fetchRiwayatTransaksi(); fetchLoginHistory();
+          fetchKeuangan(); fetchRekapSaldo(); fetchAbsensiHariIni(); fetchRiwayatTransaksi(); fetchLoginHistory(); fetchPendingUsers();
       } 
-  }, [user, userRole, historyDate, fetchKeuangan, fetchRekapSaldo, fetchAbsensiHariIni, fetchRiwayatTransaksi, fetchLoginHistory]);
+  }, [user, userRole, historyDate, fetchKeuangan, fetchRekapSaldo, fetchAbsensiHariIni, fetchRiwayatTransaksi, fetchLoginHistory, fetchPendingUsers]);
   
   useEffect(() => {
     const handleRefreshEvent = () => { 
         fetchKeuangan(); 
         fetchRekapSaldo(); 
         fetchRiwayatTransaksi(); 
+        fetchPendingUsers();
     };
     window.addEventListener("refresh-keuangan", handleRefreshEvent); 
     
@@ -264,7 +283,7 @@ const Index = () => {
         clearTimeout(timer);
         window.removeEventListener("refresh-keuangan", handleRefreshEvent); 
     };
-  }, [fetchKeuangan, fetchRekapSaldo, fetchRiwayatTransaksi, fetchAbsensiHariIni, toast]);
+  }, [fetchKeuangan, fetchRekapSaldo, fetchRiwayatTransaksi, fetchAbsensiHariIni, fetchPendingUsers, toast]);
 
   /* ACTIONS */
   const handleDeleteTransaction = async (id: string) => {
@@ -311,7 +330,6 @@ const Index = () => {
     XLSX.writeFile(wb, `${fileName}.xlsx`);
   };
 
-  // 🔥 FUNGSI RESET SALDO KHUSUS SUPER ADMIN
   const handleResetSaldo = async () => {
     if (!resetKelas || !resetGender) return toast({ title: "Perhatian", description: "Mohon pilih Kelas dan Gender terlebih dahulu.", variant: "destructive" });
     if (!window.confirm(`PERINGATAN KERAS!\n\nAnda yakin ingin MENGOSONGKAN SALDO seluruh santri Kelas ${resetKelas} ${resetGender}?\n\nData yang direset tidak bisa dikembalikan.`)) return;
@@ -559,6 +577,69 @@ const Index = () => {
           </div>
           
           <div className="flex items-center gap-3 max-w-[70%]">
+              
+              {/* 🔥 FITUR KOTAK PESAN (NOTIFIKASI SUPER ADMIN) */}
+              {isSuperAdmin && (
+                  <div className="relative">
+                      <button 
+                          onClick={() => setIsNotifOpen(!isNotifOpen)}
+                          className="p-2 bg-white border border-green-100 rounded-full text-gray-600 hover:text-green-600 hover:bg-green-50 transition-colors relative shadow-sm"
+                      >
+                          <Bell size={20} />
+                          {pendingUsersCount > 0 && (
+                              <span className="absolute -top-1 -right-1 h-5 w-5 bg-red-500 rounded-full text-[10px] text-white flex items-center justify-center font-bold border-2 border-white shadow-sm">
+                                  {pendingUsersCount}
+                              </span>
+                          )}
+                      </button>
+
+                      {isNotifOpen && (
+                          <>
+                              <div className="fixed inset-0 z-40" onClick={() => setIsNotifOpen(false)}></div>
+                              <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-2xl border border-green-100 overflow-hidden z-50 animate-in fade-in slide-in-from-top-2">
+                                  <div className="bg-green-50 p-3 border-b border-green-100 flex items-center justify-between">
+                                      <div className="flex items-center gap-2">
+                                          <Bell className="w-4 h-4 text-green-700" />
+                                          <h4 className="text-sm font-bold text-green-900">Notifikasi Sistem</h4>
+                                      </div>
+                                      <span className="text-[10px] bg-green-200 text-green-800 px-2 py-0.5 rounded-full font-bold">{pendingUsersCount} Baru</span>
+                                  </div>
+                                  <div className="p-4">
+                                      {pendingUsersCount > 0 ? (
+                                          <div className="space-y-4">
+                                              <div className="flex items-start gap-3 p-3 bg-yellow-50 border border-yellow-100 rounded-lg">
+                                                  <div className="p-2 bg-yellow-100 text-yellow-700 rounded-full shrink-0">
+                                                      <UserCog size={16} />
+                                                  </div>
+                                                  <div>
+                                                      <p className="text-sm font-bold text-gray-800">Akun Perlu Verifikasi</p>
+                                                      <p className="text-xs text-gray-600 mt-1">Terdapat <strong>{pendingUsersCount} akun baru</strong> yang mendaftar dan masih berstatus "pending".</p>
+                                                  </div>
+                                              </div>
+                                              <Button 
+                                                  onClick={() => {
+                                                      setIsNotifOpen(false);
+                                                      handleMenuClick("pengguna");
+                                                  }} 
+                                                  className="w-full bg-green-600 hover:bg-green-700 text-xs h-9 shadow-sm"
+                                              >
+                                                  Proses Sekarang
+                                              </Button>
+                                          </div>
+                                      ) : (
+                                          <div className="text-center py-6">
+                                              <div className="w-12 h-12 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-2"><Bell className="w-5 h-5 text-gray-300"/></div>
+                                              <p className="text-sm font-bold text-gray-500">Tidak ada notifikasi</p>
+                                              <p className="text-xs text-gray-400 mt-1">Semua sistem berjalan lancar.</p>
+                                          </div>
+                                      )}
+                                  </div>
+                              </div>
+                          </>
+                      )}
+                  </div>
+              )}
+
               <div className="flex items-center gap-3 bg-white/90 backdrop-blur-sm p-1.5 pr-4 rounded-full shadow-sm border border-green-100 hover:shadow-md transition-all cursor-pointer group" onClick={signOut} title="Klik untuk Keluar">
                   <div className="h-10 w-10 rounded-full bg-gradient-to-br from-green-600 to-green-800 flex items-center justify-center text-white font-bold text-sm shadow-inner shrink-0 overflow-hidden">
                       {avatarUrl ? <img src={avatarUrl} alt="User" className="h-full w-full object-cover" /> : getInitials(userName)}

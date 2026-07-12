@@ -117,6 +117,17 @@ const Index = () => {
             if (data) {
                 setUserRole(data.role);
                 if (data.role === 'kantin') { navigate('/kasir'); return; }
+
+                // 🔥 LOGIKA BARU: REKAM AKTIVITAS "MEMBUKA WEB"
+                // Cek apakah di sesi tab browser ini user sudah dicatat
+                const sessionKey = `has_opened_web_${user.id}`;
+                if (!sessionStorage.getItem(sessionKey)) {
+                    // Jika belum, masukkan data ke tabel user_login_logs
+                    await supabase.from('user_login_logs').insert([{ user_id: user.id }]);
+                    
+                    // Tandai di memori browser supaya tidak nyatat berulang-ulang saat klik menu
+                    sessionStorage.setItem(sessionKey, 'true');
+                }
             }
         } catch (err) { console.error("Gagal cek role:", err); }
     };

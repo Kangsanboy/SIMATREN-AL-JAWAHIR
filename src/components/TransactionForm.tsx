@@ -9,7 +9,7 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { CalendarIcon, Download, ArrowDownCircle, ArrowUpCircle, Store, Wallet } from "lucide-react";
+import { CalendarIcon, ArrowDownCircle, ArrowUpCircle, Store, Wallet } from "lucide-react";
 
 interface Santri {
   id: string;
@@ -117,9 +117,8 @@ const TransactionForm = () => {
 
   useEffect(() => { fetchData(); }, [kelas, gender]);
 
-  /* HANDLER INPUT MASSAL - DENGAN FIX BUG TITIK DESIMAL */
+  /* HANDLER INPUT MASSAL */
   const handleAmountChange = (id: string, val: string) => {
-    // 🔥 Bersihkan nilai dari semua karakter selain angka (menghapus titik yang diketik user)
     const cleanVal = val.replace(/\D/g, '');
     setFormData(prev => ({ ...prev, [id]: { ...prev[id], amount: cleanVal } }));
   };
@@ -143,7 +142,6 @@ const TransactionForm = () => {
         const rowData = formData[santri.id];
         let finalAmount = 0;
 
-        // 🔥 Proteksi Ganda: Jika masih ada titik terselip, bersihkan lagi saat mau masuk DB
         const rawAmountString = String(rowData?.amount || "0").replace(/\D/g, "");
 
         if (type === 'pemasukan') {
@@ -155,7 +153,6 @@ const TransactionForm = () => {
         }
 
         if (finalAmount > 0) {
-            // Proteksi Saldo Minus untuk Pengeluaran
             if (type === 'pengeluaran' && finalAmount > santri.saldo) {
                 toast({ title: `Saldo ${santri.nama_lengkap} Tidak Cukup!`, description: `Sisa Rp ${santri.saldo.toLocaleString("id-ID")}`, variant: "destructive" });
                 hasError = true; break; 
@@ -202,11 +199,7 @@ const TransactionForm = () => {
                 <CardTitle className="text-xl font-bold text-gray-800">Buku Kas Kelas</CardTitle>
                 <p className="text-sm text-gray-500">Input transaksi santri secara massal.</p>
             </div>
-            
-            {/* TOMBOL EXPORT HANYA UNTUK SELAIN PENGASUH */}
-            {currentUser?.role !== 'pengasuh' && (
-                <Button variant="outline" className="border-green-200 text-green-700 hover:bg-green-50 shadow-sm"><Download className="w-4 h-4 mr-2"/> Export Data</Button>
-            )}
+            {/* Tombol Export Data sudah dihapus dari sini */}
         </CardHeader>
 
         <CardContent className="pt-6 space-y-6">

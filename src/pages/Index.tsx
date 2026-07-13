@@ -16,6 +16,7 @@ import ClassManagement from "@/components/ClassManagement";
 import PiketManagement from "@/components/PiketManagement";
 import ViolationManagement from "@/components/ViolationManagement";
 import PermitManagement from "@/components/PermitManagement";
+import RFIDCardPrint from "@/components/RFIDCardPrint"; // 🔥 IMPORT FILE BARU
 import { DoorOpen } from "lucide-react"; 
 import { Scale } from "lucide-react"; 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,7 +28,7 @@ import {
   LayoutDashboard, Wallet, Users, User, UserCog, LogOut, PanelLeftClose, PanelLeftOpen,
   Banknote, FileSpreadsheet, CalendarDays, Menu, History, ArrowUpCircle, ArrowDownCircle,
   Clock, ShieldAlert, Trash2, ScanBarcode, Store, BarChart3, GraduationCap, CalendarClock, 
-  Activity, Shield, Library, ShieldCheck, UserCheck, RefreshCcw, AlertTriangle, Bell
+  Activity, Shield, Library, ShieldCheck, UserCheck, RefreshCcw, AlertTriangle, Bell, CreditCard
 } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip as RechartsTooltip } from "recharts";
 
@@ -47,7 +48,8 @@ const Index = () => {
   const navigate = useNavigate();
   
   /* ================= STATE ================= */
-  const [activeMenu, setActiveMenu] = useState<"dashboard" | "keuangan" | "santri" | "manajemen_kelas" | "pengguna" | "monitoring_warung" | "akademik" | "absensi" | "guru" | "kesehatan" | "piket" | "pelanggaran" | "perizinan">("dashboard");
+  // 🔥 UPDATE STATE activeMenu
+  const [activeMenu, setActiveMenu] = useState<"dashboard" | "keuangan" | "santri" | "manajemen_kelas" | "pengguna" | "monitoring_warung" | "akademik" | "absensi" | "guru" | "kesehatan" | "piket" | "pelanggaran" | "perizinan" | "cetak_kartu">("dashboard");
   const [isSidebarOpen, setSidebarOpen] = useState(window.innerWidth >= 768); 
   const [selectedKelasSantri, setSelectedKelasSantri] = useState<number | null>(null);
   const [detailSantriId, setDetailSantriId] = useState<string | null>(null);
@@ -61,12 +63,10 @@ const Index = () => {
   const [exportMonth, setExportMonth] = useState(new Date().getMonth());
   const [exportYear, setExportYear] = useState(new Date().getFullYear());
   
-  // 🔥 STATE RESET SALDO
   const [resetKelas, setResetKelas] = useState<string>("");
   const [resetGender, setResetGender] = useState<string>("");
   const [isResetting, setIsResetting] = useState(false);
 
-  // 🔥 STATE NOTIFIKASI
   const [pendingUsersCount, setPendingUsersCount] = useState(0);
   const [isNotifOpen, setIsNotifOpen] = useState(false);
 
@@ -234,7 +234,6 @@ const Index = () => {
       }
   }, [userRole]);
 
-  // 🔥 FETCH DATA NOTIFIKASI PENDING USER (HANYA SUPER ADMIN)
   const fetchPendingUsers = useCallback(async () => {
       if (userRole === 'super_admin') {
           const { count, error } = await supabase
@@ -522,6 +521,11 @@ const Index = () => {
            
            <button onClick={() => handleMenuClick("santri")} className={`flex items-center w-full px-4 py-3 rounded-lg transition-all text-sm font-medium whitespace-nowrap ${activeMenu === "santri" ? "bg-green-700 text-white shadow-lg border-l-4 border-yellow-400 pl-3" : "text-green-100 hover:bg-green-800"}`}><Users className="mr-3 h-5 w-5 flex-shrink-0" />Data Santri</button>
 
+           {/* 🔥 TAMBAHKAN TOMBOL MENU CETAK KARTU (Khusus Super Admin & Admin) */}
+           {(isSuperAdmin || isAdmin) && (
+               <button onClick={() => handleMenuClick("cetak_kartu")} className={`flex items-center w-full px-4 py-3 rounded-lg transition-all text-sm font-medium whitespace-nowrap ${activeMenu === "cetak_kartu" ? "bg-green-700 text-white shadow-lg border-l-4 border-yellow-400 pl-3" : "text-green-100 hover:bg-green-800"}`}><CreditCard className="mr-3 h-5 w-5 flex-shrink-0" />Cetak Kartu Santri</button>
+           )}
+
            {!isGuru && !isPengasuh && (
                <>
                    <button onClick={() => handleMenuClick("manajemen_kelas")} className={`flex items-center w-full px-4 py-3 rounded-lg transition-all text-sm font-medium whitespace-nowrap ${activeMenu === "manajemen_kelas" ? "bg-green-700 text-white shadow-lg border-l-4 border-yellow-400 pl-3" : "text-green-100 hover:bg-green-800"}`}><Library className="mr-3 h-5 w-5 flex-shrink-0" />Manajemen Kelas</button>
@@ -569,8 +573,7 @@ const Index = () => {
 
       <div className="flex-1 flex flex-col h-screen overflow-hidden relative w-full">
         
-        {/* 🔥 FIX Z-INDEX HEADER JADI z-50 DAN RELATIVE */}
-        <header className="bg-gradient-to-r from-white via-green-50/50 to-green-100/60 backdrop-blur-md h-20 flex items-center justify-between px-4 md:px-6 shadow-sm z-50 relative border-b border-green-200 flex-shrink-0">
+        <header className="no-print bg-gradient-to-r from-white via-green-50/50 to-green-100/60 backdrop-blur-md h-20 flex items-center justify-between px-4 md:px-6 shadow-sm z-50 relative border-b border-green-200 flex-shrink-0">
           <div className="flex items-center gap-3">
               <div className="flex items-center gap-2">
                   <button onClick={() => setSidebarOpen(!isSidebarOpen)} className="text-green-800 p-2.5 bg-white border border-green-100 shadow-sm hover:bg-green-50 rounded-xl transition-all">{isSidebarOpen ? <PanelLeftClose size={20} className="hidden md:block" /> : <PanelLeftOpen size={20} className="hidden md:block" />}<Menu size={20} className="md:hidden" /></button>
@@ -595,10 +598,7 @@ const Index = () => {
 
                       {isNotifOpen && (
                           <>
-                              {/* Overlay dengan z-[90] dan bg agak gelap sedikit biar kelihatan fokus */}
                               <div className="fixed inset-0 z-[90] bg-black/5" onClick={() => setIsNotifOpen(false)}></div>
-                              
-                              {/* Notifikasi Menu dengan z-[100] paling tinggi */}
                               <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-2xl border border-green-100 overflow-hidden z-[100] animate-in fade-in slide-in-from-top-2">
                                   <div className="bg-green-50 p-3 border-b border-green-100 flex items-center justify-between">
                                       <div className="flex items-center gap-2">
@@ -675,7 +675,6 @@ const Index = () => {
         <main className="flex-1 overflow-y-auto p-3 md:p-8 bg-gray-50/50 w-full">
           <div className="max-w-7xl mx-auto space-y-6 pb-20">
              
-             {/* DASHBOARD */}
              {activeMenu === "dashboard" && (
                 <div className="space-y-6 animate-in fade-in zoom-in duration-300">
                    <div className="text-center space-y-2 pb-4 border-b border-gray-200"><h1 className="text-xl md:text-3xl font-bold text-green-700 uppercase tracking-wide px-2">DASHBOARD PUSAT</h1><p className="text-gray-500 max-w-3xl mx-auto text-xs md:text-base leading-relaxed px-4">Ringkasan data pesantren secara real-time.</p></div>
@@ -690,7 +689,6 @@ const Index = () => {
                        </div>
                    </div>
 
-                   {/* DATA KEUANGAN */}
                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                      {[7, 8, 9, 10, 11, 12].map((kls) => {
                        const ikhwan = rekapSaldo.find((r) => r.kelas === kls && r.gender === "ikhwan")?.saldo || 0;
@@ -761,7 +759,6 @@ const Index = () => {
                 </div>
              )}
              
-             {/* KEUANGAN */}
              {activeMenu === "keuangan" && hasAdminAccess && (
                  <div className="space-y-6 animate-in fade-in zoom-in duration-300">
                     <div className="flex items-center justify-between mb-2"><h2 className="text-xl md:text-2xl font-bold text-gray-800">Keuangan</h2></div>
@@ -810,7 +807,6 @@ const Index = () => {
                     </Card>
                     )}
 
-                    {/* 🔥 FORM RESET SALDO KHUSUS SUPER ADMIN */}
                     {isSuperAdmin && (
                         <Card className="border-red-200 bg-white shadow-sm overflow-hidden mb-6">
                             <CardHeader className="bg-red-50/50 border-b border-red-100 pb-3 p-4">
@@ -893,13 +889,17 @@ const Index = () => {
                  </div>
              )}
 
-             {/* DATA SANTRI */}
              {activeMenu === "santri" && (
                <div className="animate-in fade-in zoom-in duration-300 space-y-4">
                  {detailSantriId ? <SantriDetail santriId={detailSantriId} onBack={handleBackFromDetail} /> : (<><div className="flex flex-col md:flex-row md:items-center justify-between bg-white p-3 rounded-lg border shadow-sm gap-2"><h2 className="text-base md:text-lg font-bold text-gray-800">{selectedKelasSantri ? `Data Santri Kelas ${selectedKelasSantri}` : "Data Semua Santri"}</h2>{selectedKelasSantri && <Button variant="outline" size="sm" onClick={() => setSelectedKelasSantri(null)} className="w-full md:w-auto">Tampilkan Semua</Button>}</div><SantriManagement key={selectedKelasSantri || 'all'} kelas={selectedKelasSantri ? String(selectedKelasSantri) : null} onSelectSantri={handleSelectSantri} /></>)}
                </div>
              )}
              
+             {/* 🔥 RENDER MENU CETAK KARTU (Khusus Super Admin & Admin) */}
+             {activeMenu === "cetak_kartu" && (isSuperAdmin || isAdmin) && (
+                 <RFIDCardPrint />
+             )}
+
              {/* LAIN-LAIN */}
              {activeMenu === "guru" && !isGuru && !isPengasuh && <div className="animate-in fade-in zoom-in duration-300"><TeacherManagement /></div>}
              {activeMenu === "manajemen_kelas" && !isGuru && !isPengasuh && <ClassManagement />}

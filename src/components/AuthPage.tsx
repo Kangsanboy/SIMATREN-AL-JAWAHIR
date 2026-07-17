@@ -16,7 +16,7 @@ const AuthPage = () => {
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState(""); 
   const [loading, setLoading] = useState(false);
-  const [loadingProvider, setLoadingProvider] = useState<string | null>(null); // State khusus loading tombol sosmed
+  const [loadingProvider, setLoadingProvider] = useState<string | null>(null); 
   
   const [isLogin, setIsLogin] = useState(true);
   const [isForgotPassword, setIsForgotPassword] = useState(false); 
@@ -27,11 +27,23 @@ const AuthPage = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
+    // 🔥 1. DETEKSI MANUAL DARI URL (Untuk mengatasi delay React Vite)
+    const hash = window.location.hash;
+    if (hash && hash.includes("type=recovery")) {
+      setIsUpdatePassword(true);
+      setIsForgotPassword(false);
+      setIsLogin(false);
+    }
+
+    // 🔥 2. LISTENER BAWAAN SUPABASE
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'PASSWORD_RECOVERY') {
-        setIsUpdatePassword(true); setIsForgotPassword(false); setIsLogin(false);
+        setIsUpdatePassword(true); 
+        setIsForgotPassword(false); 
+        setIsLogin(false);
       }
     });
+    
     return () => { authListener.subscription.unsubscribe(); };
   }, []);
 
@@ -81,13 +93,21 @@ const AuthPage = () => {
     try {
       const { error } = await supabase.auth.updateUser({ password: password });
       if (error) throw error;
+      
       toast({ title: "Kata Sandi Diperbarui!", description: "Silakan masuk menggunakan kata sandi baru Anda.", className: "bg-green-600 text-white font-bold" });
-      setPassword(""); setIsUpdatePassword(false); setIsLogin(true);
-    } catch (err: any) { toast({ title: "Gagal Mengubah Sandi", description: err.message, variant: "destructive" }); } 
+      
+      // Bersihkan URL Hash biar pas di-refresh nggak balik ke form reset password lagi
+      window.history.replaceState(null, "", window.location.pathname);
+      
+      setPassword(""); 
+      setIsUpdatePassword(false); 
+      setIsLogin(true);
+    } catch (err: any) { 
+      toast({ title: "Gagal Mengubah Sandi", description: err.message, variant: "destructive" }); 
+    } 
     finally { setLoading(false); }
   };
 
-  // 🔥 FUNGSI LOGIN GOOGLE & FACEBOOK
   const handleOAuthLogin = async (provider: 'google' | 'facebook') => {
     setLoadingProvider(provider);
     try {
@@ -140,7 +160,6 @@ const AuthPage = () => {
         <Card className="w-full max-w-md border-none shadow-2xl lg:shadow-none bg-white/95 lg:bg-transparent backdrop-blur-md rounded-3xl lg:rounded-none">
           <CardContent className="p-8 lg:p-0 space-y-8">
             
-            {/* LUPA SANDI & GANTI SANDI DISINI (Diringkas agar fokus ke tampilan form login) */}
             {isUpdatePassword ? (
               <div className="animate-in fade-in zoom-in duration-500">
                 <div className="space-y-2 text-center lg:text-left mb-6">
@@ -148,7 +167,12 @@ const AuthPage = () => {
                   <h2 className="text-2xl font-bold text-gray-900">Buat Sandi Baru</h2>
                 </div>
                 <form onSubmit={handleUpdatePassword} className="space-y-4">
-                  <Input type={showPassword ? "text" : "password"} placeholder="Minimal 6 karakter" value={password} onChange={(e) => setPassword(e.target.value)} required className="h-12"/>
+                  <div className="relative">
+                      <Input type={showPassword ? "text" : "password"} placeholder="Minimal 6 karakter" value={password} onChange={(e) => setPassword(e.target.value)} required className="h-12 pr-10"/>
+                      <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">
+                        {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                      </button>
+                  </div>
                   <Button type="submit" className="w-full h-12 bg-green-600 text-white" disabled={loading}>Simpan Sandi Baru</Button>
                 </form>
               </div>
@@ -160,7 +184,7 @@ const AuthPage = () => {
                 </div>
                 <form onSubmit={handleResetPassword} className="space-y-4">
                   <Input type="email" placeholder="Email terdaftar" value={email} onChange={(e) => setEmail(e.target.value)} required className="h-12"/>
-                  <Button type="submit" className="w-full h-12 bg-orange-500 text-white" disabled={loading}>Kirim Tautan Reset</Button>
+                  <Button type="submit" className="w-full h-12 bg-orange-500 hover:bg-orange-600 text-white shadow-md" disabled={loading}>Kirim Tautan Reset</Button>
                   <Button variant="link" onClick={() => setIsForgotPassword(false)} className="w-full text-gray-500">Kembali ke Login</Button>
                 </form>
               </div>

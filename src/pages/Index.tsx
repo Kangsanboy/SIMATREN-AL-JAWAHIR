@@ -16,7 +16,7 @@ import ClassManagement from "@/components/ClassManagement";
 import PiketManagement from "@/components/PiketManagement";
 import ViolationManagement from "@/components/ViolationManagement";
 import PermitManagement from "@/components/PermitManagement";
-import RFIDCardPrint from "@/components/RFIDCardPrint"; // 🔥 IMPORT FILE BARU
+import RFIDCardPrint from "@/components/RFIDCardPrint"; 
 import { DoorOpen } from "lucide-react"; 
 import { Scale } from "lucide-react"; 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -48,7 +48,6 @@ const Index = () => {
   const navigate = useNavigate();
   
   /* ================= STATE ================= */
-  // 🔥 UPDATE STATE activeMenu
   const [activeMenu, setActiveMenu] = useState<"dashboard" | "keuangan" | "santri" | "manajemen_kelas" | "pengguna" | "monitoring_warung" | "akademik" | "absensi" | "guru" | "kesehatan" | "piket" | "pelanggaran" | "perizinan" | "cetak_kartu">("dashboard");
   const [isSidebarOpen, setSidebarOpen] = useState(window.innerWidth >= 768); 
   const [selectedKelasSantri, setSelectedKelasSantri] = useState<number | null>(null);
@@ -467,7 +466,11 @@ const Index = () => {
 
   /* ================= UI RENDER ================= */
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-gray-50"><div className="animate-spin h-10 w-10 border-b-2 border-green-600 rounded-full" /></div>;
-  if (!user) return <AuthPage />;
+
+  // 🔥 FIX LUPA PASSWORD: Tahan user di AuthPage jika URL mengandung type=recovery
+  const isRecoveryMode = window.location.hash.includes("type=recovery");
+
+  if (!user || isRecoveryMode) return <AuthPage />;
 
   const avatarUrl = user?.user_metadata?.avatar_url;
   const userName = user?.user_metadata?.full_name || user?.email?.split('@')[0];
